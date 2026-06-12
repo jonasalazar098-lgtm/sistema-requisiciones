@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+*.pdf
+*.xlsm
+# Mantener FORMATOS.xlsx porque son plantillas internas
+!FORMATOS.xlsx
