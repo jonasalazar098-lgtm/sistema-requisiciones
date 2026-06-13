@@ -251,52 +251,64 @@ def marcar_cierre_tabla(ws, primera_fila_vacia: int, ultima_fila_vacia: int, col
     """
     Cierre visual de la orden:
     - Línea gris inmediatamente después del último artículo.
-    - Diagonal encima del espacio vacío restante.
-    Se inserta como imagen para que aparezca igual en Excel y PDF.
+    - Diagonal sobre el espacio vacío restante.
+
+    Esta versión usa 3 capas para que sea robusto:
+    1) borde gris en la fila de cierre,
+    2) diagonales de borde en celdas como respaldo,
+    3) shape/dibujo diagonal dentro del XLSX al guardar.
     """
     gris = Side(style="medium", color="808080")
+    gris_delgado = Side(style="thin", color="808080")
 
-    # Siempre poner línea gris debajo del último artículo.
     fila_ultimo_articulo = max(1, primera_fila_vacia - 1)
+
+    # Línea gris fuerte justo después del último artículo.
     for col in range(col_inicio, col_fin + 1):
         celda_ultimo = ws.cell(fila_ultimo_articulo, col)
         if not isinstance(celda_ultimo, MergedCell):
             celda_ultimo.border = _reemplazar_borde(celda_ultimo.border, bottom=gris)
 
-    # La diagonal solo se puede dibujar si hay espacio vacío antes del subtotal.
+    # Si no hay espacio vacío, solo se deja la línea gris.
     if primera_fila_vacia > ultima_fila_vacia:
         ws._cierre_visual = None
         return
 
+    # Línea gris en la primera fila vacía.
     for col in range(col_inicio, col_fin + 1):
         celda_inicio = ws.cell(primera_fila_vacia, col)
         if not isinstance(celda_inicio, MergedCell):
             celda_inicio.border = _reemplazar_borde(celda_inicio.border, top=gris)
 
-    meta = {
+    # Respaldo: dibuja una diagonal por celdas, visible en Excel y PDF aunque fallen shapes.
+    total_filas = max(1, ultima_fila_vacia - primera_fila_vacia + 1)
+    total_cols = max(1, col_fin - col_inicio + 1)
+
+    for r in range(primera_fila_vacia, ultima_fila_vacia + 1):
+        progreso = (r - primera_fila_vacia) / max(1, total_filas - 1)
+        # abajo izquierda -> arriba derecha: conforme baja la fila, va hacia columnas iniciales
+        col_centro = int(round(col_fin - progreso * (total_cols - 1)))
+        for c in range(max(col_inicio, col_centro - 1), min(col_fin, col_centro + 1) + 1):
+            celda = ws.cell(r, c)
+            if not isinstance(celda, MergedCell):
+                celda.border = _reemplazar_borde(
+                    celda.border,
+                    diagonal=gris_delgado,
+                    diagonal_up=True,
+                    diagonal_down=False,
+                )
+
+    width_px = sum(_ancho_columna_px(ws, c) for c in range(col_inicio, col_fin + 1))
+    height_px = sum(_alto_fila_px(ws, r) for r in range(primera_fila_vacia, ultima_fila_vacia + 1))
+
+    ws._cierre_visual = {
         "first_blank_row": primera_fila_vacia,
         "last_blank_row": ultima_fila_vacia,
         "start_col": col_inicio,
         "end_col": col_fin,
+        "width_px": max(width_px, 120),
+        "height_px": max(height_px, 40),
     }
-
-    try:
-        imagen_path = _crear_imagen_diagonal(ws, meta)
-        img_excel = ExcelImage(imagen_path)
-        img_excel.anchor = ws.cell(primera_fila_vacia, col_inicio).coordinate
-
-        # Ajusta tamaño para cubrir el rango vacío.
-        img_excel.width = sum(_ancho_columna_px(ws, c) for c in range(col_inicio, col_fin + 1))
-        img_excel.height = sum(_alto_fila_px(ws, r) for r in range(primera_fila_vacia, ultima_fila_vacia + 1))
-
-        ws.add_image(img_excel)
-        ws._imagenes_cierre = getattr(ws, "_imagenes_cierre", [])
-        ws._imagenes_cierre.append(imagen_path)
-    except Exception:
-        # Si por alguna razón la imagen falla, al menos queda la línea gris.
-        pass
-
-    ws._cierre_visual = meta
 
 
 def _normalizar_target(base_path: str, target: str) -> str:
@@ -340,6 +352,9 @@ def _crear_anchor_diagonal(meta: dict[str, int], shape_id: int):
     ns_xdr = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
     ns_a = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
+    ancho_emu = str(int(meta.get("width_px", 800) * 9525))
+    alto_emu = str(int(meta.get("height_px", 400) * 9525))
+
     anchor = ET.Element(f"{{{ns_xdr}}}twoCellAnchor", {"editAs": "twoCell"})
 
     desde = ET.SubElement(anchor, f"{{{ns_xdr}}}from")
@@ -360,17 +375,18 @@ def _crear_anchor_diagonal(meta: dict[str, int], shape_id: int):
     ET.SubElement(nv, f"{{{ns_xdr}}}cNvSpPr")
 
     sppr = ET.SubElement(sp, f"{{{ns_xdr}}}spPr")
-    # flipV hace que la línea vaya de abajo-izquierda a arriba-derecha dentro del rectángulo.
+    # flipV = línea de abajo-izquierda hacia arriba-derecha.
     xfrm = ET.SubElement(sppr, f"{{{ns_a}}}xfrm", {"flipV": "1"})
     ET.SubElement(xfrm, f"{{{ns_a}}}off", {"x": "0", "y": "0"})
-    ET.SubElement(xfrm, f"{{{ns_a}}}ext", {"cx": "0", "cy": "0"})
+    ET.SubElement(xfrm, f"{{{ns_a}}}ext", {"cx": ancho_emu, "cy": alto_emu})
 
     geom = ET.SubElement(sppr, f"{{{ns_a}}}prstGeom", {"prst": "line"})
     ET.SubElement(geom, f"{{{ns_a}}}avLst")
 
-    ln = ET.SubElement(sppr, f"{{{ns_a}}}ln", {"w": "19050", "cap": "flat"})
+    # Línea gris más visible.
+    ln = ET.SubElement(sppr, f"{{{ns_a}}}ln", {"w": "25400", "cap": "flat"})
     fill = ET.SubElement(ln, f"{{{ns_a}}}solidFill")
-    ET.SubElement(fill, f"{{{ns_a}}}srgbClr", {"val": "808080"})
+    ET.SubElement(fill, f"{{{ns_a}}}srgbClr", {"val": "606060"})
 
     ET.SubElement(anchor, f"{{{ns_xdr}}}clientData")
     return anchor
@@ -902,8 +918,15 @@ def llenar_plantilla(
 
     salida = BytesIO()
     wb.save(salida)
-    salida.seek(0)
-    return salida
+    excel_bytes = salida.getvalue()
+
+    cierre_visual = getattr(ws, "_cierre_visual", None)
+    if cierre_visual:
+        excel_bytes = agregar_cierre_diagonal_xlsx(excel_bytes, ws.title, cierre_visual)
+
+    resultado = BytesIO(excel_bytes)
+    resultado.seek(0)
+    return resultado
 
 
 # =========================
@@ -1055,8 +1078,15 @@ def generar_excel_simple(campos: dict[str, Any], partidas: list[dict[str, Any]])
 
     salida = BytesIO()
     wb.save(salida)
-    salida.seek(0)
-    return salida
+    excel_bytes = salida.getvalue()
+
+    cierre_visual = getattr(ws, "_cierre_visual", None)
+    if cierre_visual:
+        excel_bytes = agregar_cierre_diagonal_xlsx(excel_bytes, ws.title, cierre_visual)
+
+    resultado = BytesIO(excel_bytes)
+    resultado.seek(0)
+    return resultado
 
 
 # =========================

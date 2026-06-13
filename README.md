@@ -1,11 +1,11 @@
-# Sistema de requisiciones v14
+# Sistema de requisiciones v15
 
-Cambios sobre v13:
-- Corrige el cierre visual para que sí aparezca en Excel y PDF.
-- La diagonal ahora se inserta como imagen transparente sobre el espacio vacío.
-- Mantiene la línea gris después del último artículo.
-- El PDF se genera desde el mismo Excel final, por eso ambos deben verse iguales.
-- Mantiene packages.txt con libreoffice-calc para Streamlit Community Cloud.
+Cambios sobre v14:
+- Refuerza el cierre visual.
+- Agrega línea gris fuerte después del último artículo.
+- Agrega diagonal como shape/dibujo interno del XLSX.
+- Agrega diagonales por celdas como respaldo para que se vean también en PDF.
+- El PDF se genera desde el mismo Excel final.
 
 ## Archivos requeridos
 
@@ -28,4 +28,4 @@ python -m streamlit run app.py
 
 ## Nota
 
-Si una requisición llena casi todas las filas disponibles, puede quedar solo la línea gris y poca o ninguna diagonal porque ya no queda espacio vacío que cerrar. En requisiciones con espacio libre, aparece la diagonal sobre ese espacio.
+Después de subir a GitHub, reinicia la app en Streamlit Cloud para forzar que use el app.py nuevo.
