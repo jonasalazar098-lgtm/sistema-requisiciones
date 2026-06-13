@@ -18,7 +18,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.drawing.image import Image as ExcelImage
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 from PIL import Image as PILImage, ImageDraw
 
 try:
@@ -679,26 +679,57 @@ def find_totals_row(ws, start_row: int):
     return start_row + 40
 
 
+def copiar_merges_de_fila(ws, source_row: int, target_row: int):
+    """
+    Copia las celdas combinadas de una fila modelo hacia una fila nueva.
+    Esto evita que las filas extra pierdan las líneas/estructura de la plantilla.
+    """
+    merges_modelo = []
+
+    for rango in list(ws.merged_cells.ranges):
+        min_col, min_row, max_col, max_row = range_boundaries(str(rango))
+        if min_row == source_row and max_row == source_row:
+            merges_modelo.append((min_col, max_col))
+
+    for min_col, max_col in merges_modelo:
+        if max_col <= min_col:
+            continue
+        try:
+            ws.merge_cells(
+                start_row=target_row,
+                start_column=min_col,
+                end_row=target_row,
+                end_column=max_col,
+            )
+        except Exception:
+            pass
+
+
 def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count: int):
     capacidad = subtotal_row - data_start
     filas_extra = max(0, partidas_count - capacidad)
 
     if filas_extra:
-        # Copiar siempre el formato de una fila normal de artículo.
-        # No copiar la fila previa al subtotal porque algunas plantillas tienen
-        # estilos raros en esa zona.
+        # Usar como modelo una fila normal de producto, no la fila cerca del subtotal.
         fila_estilo = data_start
+
+        # Guardar altura y merges de la fila modelo antes de insertar.
+        altura_modelo = ws.row_dimensions[fila_estilo].height
+
         ws.insert_rows(subtotal_row, amount=filas_extra)
+
         for row in range(subtotal_row, subtotal_row + filas_extra):
             copy_row_style(ws, fila_estilo, row, ws.max_column)
+            copiar_merges_de_fila(ws, fila_estilo, row)
+            if altura_modelo is not None:
+                ws.row_dimensions[row].height = altura_modelo
 
     return filas_extra
 
 
 def celda_real(ws, row: int, col: int):
     """
-    Devuelve la celda ancla real aunque la coordenada esté dentro de una celda combinada.
-    Esto permite alinear textos sin romper las líneas ni descombinar la plantilla.
+    Devuelve la celda ancla real aunque la coordenada caiga dentro de una celda combinada.
     """
     coord = ws.cell(row, col).coordinate
     return ws[anchor_coord(ws, coord)]
@@ -706,7 +737,7 @@ def celda_real(ws, row: int, col: int):
 
 def aplicar_formato_partida(ws, row: int, cols: dict[str, int]):
     """
-    Aplica formato estable respetando la estructura original de la plantilla.
+    Aplica alineación estable respetando celdas combinadas.
     """
     for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
         cell = celda_real(ws, row, col)
@@ -806,7 +837,7 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
         set_cell(ws, ws.cell(row, cols["pu"]).coordinate, partida.get("precio_unitario"))
         set_cell(ws, ws.cell(row, cols["total"]).coordinate, f"={ws.cell(row, cols['cantidad']).coordinate}*{ws.cell(row, cols['pu']).coordinate}")
 
-        # Forzar formato estable sin descombinar la tabla.
+        # Forzar formato estable respetando celdas combinadas.
         aplicar_formato_partida(ws, row, cols)
 
     # Totales.

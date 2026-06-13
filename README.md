@@ -1,15 +1,14 @@
-# Sistema de requisiciones v23
+# Sistema de requisiciones v24
 
-Corrección sobre v22:
-- Se revierte el cambio que rompía las líneas de la tabla.
-- No descombina el cuerpo completo de la requisición.
-- Respeta la estructura original de la plantilla.
-- Corrige la alineación usando la celda ancla real cuando hay celdas combinadas.
+Corrección sobre v23:
+- Se regresa a la base estable de la tabla.
+- Corrige filas extra cuando hay muchas partidas copiando también las celdas combinadas de una fila normal.
+- Evita que los últimos productos salgan desacomodados o sin estructura.
+- Respeta las líneas y celdas de la plantilla.
 - Mantiene:
   - franja gris oscura debajo del último producto.
   - una sola diagonal limpia.
   - descarga en Excel y PDF.
-  - filas de la tabla con líneas normales.
 
 ## Archivos requeridos
 
