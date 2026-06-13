@@ -1,21 +1,22 @@
-# Sistema de requisiciones v27
+# Sistema de requisiciones v26
 
-Cambio sobre v26:
-- Cuando la requisición se divide en varias hojas, el bloque inferior solo aparece en la última hoja.
-- En hojas intermedias se ocultan:
-  - Observaciones.
-  - Facturar a.
-  - Recibe.
-  - Entregar en.
-  - Firmas.
-  - Cargar a / ID Familia / Cargo / Área / Partida.
+Cambio principal:
+- Cuando una requisición tiene más productos de los que caben en el formato, la app ya no fuerza todo en una sola hoja.
+- Ahora pagina automáticamente:
+  - JAG25-1
+  - JAG25-2
+  - etc.
+
+Esto evita:
+- que el último producto salga sin celdas o sin precio.
+- que Observaciones, Facturar a, Recibe, Entregar en y Firmas se muevan.
+- que se rompa la parte inferior del formato.
 
 Mantiene:
-- Paginación automática cuando hay muchas partidas.
 - Excel y PDF.
-- Franja gris oscura debajo del último producto.
-- Una sola diagonal limpia cuando hay espacio vacío.
-- Eliminación de hojas vacías de plantilla.
+- franja gris oscura debajo del último producto cuando hay espacio.
+- una sola diagonal limpia en el espacio vacío.
+- eliminación de hojas vacías de plantilla.
 
 ## Archivos requeridos
 

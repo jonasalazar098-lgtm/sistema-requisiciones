@@ -948,64 +948,6 @@ def aplicar_cierres_visuales_a_xlsx(excel_bytes: bytes, wb, hojas_generadas: lis
     return resultado
 
 
-def ocultar_bloque_inferior_requisicion_intermedia(ws):
-    """
-    En requisiciones paginadas, las hojas intermedias no deben mostrar
-    observaciones, facturar a, recibe, entregar en ni firmas.
-    Solo la última hoja conserva ese bloque inferior.
-    """
-    try:
-        header_row = detectar_header_requisicion(ws)
-        data_start = header_row + 2
-        subtotal_row = find_totals_row(ws, data_start)
-        total_row = subtotal_row + 2
-
-        # Desde después del TOTAL hacia abajo está el bloque inferior:
-        # CARGAR A, ID FAMILIA, OBSERVACIONES, FACTURAR A, RECIBE, FIRMAS, etc.
-        inicio_ocultar = total_row + 1
-
-        for row in range(inicio_ocultar, ws.max_row + 1):
-            ws.row_dimensions[row].hidden = True
-            ws.row_dimensions[row].height = 0
-
-            for col in range(1, ws.max_column + 1):
-                cell = ws.cell(row, col)
-                if isinstance(cell, MergedCell):
-                    continue
-                cell.value = None
-                cell.border = Border()
-                cell.fill = PatternFill(fill_type=None)
-    except Exception:
-        # Si no logra detectar el bloque, no detiene la generación.
-        pass
-
-
-def ocultar_bloque_inferior_oc_intermedia(ws):
-    """
-    Para órdenes de compra paginadas: dejar el bloque inferior solo en la última hoja.
-    """
-    try:
-        header_row = detectar_header_oc(ws)
-        data_start = header_row + 1
-        subtotal = find_exact_cell(ws, "SUBTOTAL", start_row=data_start) or find_cell(ws, "SUBTOTAL", start_row=data_start)
-        subtotal_row = subtotal[0] if subtotal else data_start + 20
-        inicio_ocultar = subtotal_row + 3
-
-        for row in range(inicio_ocultar, ws.max_row + 1):
-            ws.row_dimensions[row].hidden = True
-            ws.row_dimensions[row].height = 0
-
-            for col in range(1, ws.max_column + 1):
-                cell = ws.cell(row, col)
-                if isinstance(cell, MergedCell):
-                    continue
-                cell.value = None
-                cell.border = Border()
-                cell.fill = PatternFill(fill_type=None)
-    except Exception:
-        pass
-
-
 def llenar_plantilla(
     plantilla_bytes: bytes,
     hoja_base: str,
@@ -1066,12 +1008,8 @@ def llenar_plantilla(
 
         if tipo == "orden_compra":
             llenar_orden_compra(ws, campos_pagina, grupo)
-            if total_paginas > 1 and idx < total_paginas:
-                ocultar_bloque_inferior_oc_intermedia(ws)
         else:
             llenar_requisicion(ws, campos_pagina, grupo)
-            if total_paginas > 1 and idx < total_paginas:
-                ocultar_bloque_inferior_requisicion_intermedia(ws)
 
     # Entrega limpia: dejar solo hojas generadas, no plantillas vacías.
     for nombre in list(wb.sheetnames):
