@@ -254,20 +254,18 @@ def marcar_cierre_tabla(ws, primera_fila_vacia: int, ultima_fila_vacia: int, col
     """
     Cierre visual de la orden:
     - Franja gris inmediatamente debajo del último producto.
-    - Diagonal sobre el espacio vacío restante.
+    - Una sola diagonal limpia sobre el espacio vacío restante.
 
-    Se aplica antes de generar el Excel. El PDF se crea desde ese mismo Excel,
-    por eso ambos documentos deben verse igual.
+    Se eliminan las diagonales pequeñas por celda para que el cierre se vea limpio.
     """
-    gris_borde = Side(style="medium", color="808080")
-    gris_delgado = Side(style="thin", color="808080")
-    relleno_gris = PatternFill("solid", fgColor="D9D9D9")
+    gris_borde = Side(style="medium", color="404040")
+    relleno_gris = PatternFill("solid", fgColor="A6A6A6")
 
     fila_ultimo_articulo = max(1, primera_fila_vacia - 1)
     fila_franja = primera_fila_vacia
     fila_inicio_diagonal = primera_fila_vacia + 1
 
-    # 1) Línea gris/borde debajo del último artículo.
+    # 1) Borde/línea gris debajo del último producto.
     for col in range(col_inicio, col_fin + 1):
         celda_ultimo = ws.cell(fila_ultimo_articulo, col)
         if not isinstance(celda_ultimo, MergedCell):
@@ -286,33 +284,16 @@ def marcar_cierre_tabla(ws, primera_fila_vacia: int, ultima_fila_vacia: int, col
                     bottom=gris_borde,
                 )
 
-    # Si no queda espacio después de la franja gris, no hay dónde poner diagonal.
+    # Si no queda espacio después de la franja gris, no se dibuja diagonal.
     if fila_inicio_diagonal > ultima_fila_vacia:
         ws._cierre_visual = None
         return
 
-    # 3) Respaldo: diagonal por celdas para que se vea aunque el visor ignore shapes.
-    total_filas = max(1, ultima_fila_vacia - fila_inicio_diagonal + 1)
-    total_cols = max(1, col_fin - col_inicio + 1)
-
-    for r in range(fila_inicio_diagonal, ultima_fila_vacia + 1):
-        progreso = (r - fila_inicio_diagonal) / max(1, total_filas - 1)
-        # De abajo-izquierda a arriba-derecha: al bajar la fila, la diagonal va hacia columnas iniciales.
-        col_centro = int(round(col_fin - progreso * (total_cols - 1)))
-        for c in range(max(col_inicio, col_centro - 1), min(col_fin, col_centro + 1) + 1):
-            celda = ws.cell(r, c)
-            if not isinstance(celda, MergedCell):
-                celda.border = _reemplazar_borde(
-                    celda.border,
-                    diagonal=gris_delgado,
-                    diagonal_up=True,
-                    diagonal_down=False,
-                )
-
     width_px = sum(_ancho_columna_px(ws, c) for c in range(col_inicio, col_fin + 1))
     height_px = sum(_alto_fila_px(ws, r) for r in range(fila_inicio_diagonal, ultima_fila_vacia + 1))
 
-    # 4) Diagonal principal como dibujo interno del XLSX.
+    # 3) Diagonal principal única como dibujo interno del XLSX.
+    # El PDF se genera desde este mismo Excel.
     ws._cierre_visual = {
         "first_blank_row": fila_inicio_diagonal,
         "last_blank_row": ultima_fila_vacia,
@@ -398,7 +379,7 @@ def _crear_anchor_diagonal(meta: dict[str, int], shape_id: int):
     # Línea gris más visible.
     ln = ET.SubElement(sppr, f"{{{ns_a}}}ln", {"w": "25400", "cap": "flat"})
     fill = ET.SubElement(ln, f"{{{ns_a}}}solidFill")
-    ET.SubElement(fill, f"{{{ns_a}}}srgbClr", {"val": "606060"})
+    ET.SubElement(fill, f"{{{ns_a}}}srgbClr", {"val": "404040"})
 
     ET.SubElement(anchor, f"{{{ns_xdr}}}clientData")
     return anchor

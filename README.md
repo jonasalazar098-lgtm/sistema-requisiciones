@@ -1,9 +1,10 @@
-# Sistema de requisiciones v17
+# Sistema de requisiciones v19
 
-Corrección sobre v16:
-- Agrega una franja gris visible justo debajo del último producto.
-- Mantiene la diagonal en el espacio vacío restante.
-- El cierre visual se aplica en el Excel y también aparece en el PDF porque el PDF se genera desde el Excel final.
+Cambios sobre v18:
+- La franja gris debajo del último producto ahora es más oscura.
+- La diagonal también queda en gris más oscuro.
+- Mantiene una sola diagonal limpia, sin diagonales pequeñas entre celdas.
+- Mantiene descarga en Excel y PDF.
 
 ## Archivos requeridos
 
