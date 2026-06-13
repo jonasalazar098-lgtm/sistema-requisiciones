@@ -1,20 +1,22 @@
-# Sistema de requisiciones v25
+# Sistema de requisiciones v26
 
-Corrección sobre v24:
-- Corrige que, cuando hay muchas partidas, la parte inferior de la requisición se desacomode.
-- Si hay más productos que filas disponibles, la app inserta filas pero comprime ligeramente la altura del cuerpo de productos.
-- Esto evita que se pierdan o se deformen secciones inferiores como:
-  - Observaciones.
-  - Facturar a.
-  - Recibe.
-  - Entregar en.
-  - Firmas.
-- Mantiene:
-  - líneas normales de la tabla.
-  - descripciones alineadas correctamente.
-  - franja gris oscura debajo del último producto cuando hay espacio.
-  - una sola diagonal limpia cuando queda espacio vacío.
-  - descarga en Excel y PDF.
+Cambio principal:
+- Cuando una requisición tiene más productos de los que caben en el formato, la app ya no fuerza todo en una sola hoja.
+- Ahora pagina automáticamente:
+  - JAG25-1
+  - JAG25-2
+  - etc.
+
+Esto evita:
+- que el último producto salga sin celdas o sin precio.
+- que Observaciones, Facturar a, Recibe, Entregar en y Firmas se muevan.
+- que se rompa la parte inferior del formato.
+
+Mantiene:
+- Excel y PDF.
+- franja gris oscura debajo del último producto cuando hay espacio.
+- una sola diagonal limpia en el espacio vacío.
+- eliminación de hojas vacías de plantilla.
 
 ## Archivos requeridos
 

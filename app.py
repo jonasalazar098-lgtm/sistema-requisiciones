@@ -18,7 +18,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.drawing.image import Image as ExcelImage
-from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.utils import get_column_letter
 from PIL import Image as PILImage, ImageDraw
 
 try:
@@ -679,113 +679,21 @@ def find_totals_row(ws, start_row: int):
     return start_row + 40
 
 
-def copiar_merges_de_fila(ws, source_row: int, target_row: int):
-    """
-    Copia las celdas combinadas de una fila modelo hacia una fila nueva.
-    Esto evita que las filas extra pierdan las líneas/estructura de la plantilla.
-    """
-    merges_modelo = []
-
-    for rango in list(ws.merged_cells.ranges):
-        min_col, min_row, max_col, max_row = range_boundaries(str(rango))
-        if min_row == source_row and max_row == source_row:
-            merges_modelo.append((min_col, max_col))
-
-    for min_col, max_col in merges_modelo:
-        if max_col <= min_col:
-            continue
-        try:
-            ws.merge_cells(
-                start_row=target_row,
-                start_column=min_col,
-                end_row=target_row,
-                end_column=max_col,
-            )
-        except Exception:
-            pass
-
-
-def _alto_fila_excel(ws, row: int) -> float:
-    alto = ws.row_dimensions[row].height
-    if alto is None:
-        return 15.0
-    try:
-        return float(alto)
-    except Exception:
-        return 15.0
-
-
 def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count: int):
     capacidad = subtotal_row - data_start
     filas_extra = max(0, partidas_count - capacidad)
 
-    # Alto físico original disponible para el cuerpo de la tabla.
-    # Si hay demasiadas partidas, se reparte ese mismo espacio entre más filas
-    # para no empujar/desacomodar observaciones, firmas y parte inferior.
-    alto_original_total = sum(_alto_fila_excel(ws, r) for r in range(data_start, subtotal_row))
-
     if filas_extra:
+        # Copiar siempre el formato de una fila normal de artículo.
+        # Antes se copiaba la fila justo antes del subtotal y, en algunos formatos,
+        # esa fila tenía alineación/estilo raro. Por eso los últimos productos
+        # podían salir centrados o desacomodados cuando había muchas partidas.
         fila_estilo = data_start
-        altura_modelo = ws.row_dimensions[fila_estilo].height
-
         ws.insert_rows(subtotal_row, amount=filas_extra)
-
         for row in range(subtotal_row, subtotal_row + filas_extra):
             copy_row_style(ws, fila_estilo, row, ws.max_column)
-            copiar_merges_de_fila(ws, fila_estilo, row)
-            if altura_modelo is not None:
-                ws.row_dimensions[row].height = altura_modelo
-
-        # Comprimir un poco todas las filas de artículos para que el bloque inferior
-        # conserve su posición visual en el PDF.
-        nuevo_total_filas = capacidad + filas_extra
-        if nuevo_total_filas > 0:
-            nuevo_alto = alto_original_total / nuevo_total_filas
-            # Evitar que quede ilegible.
-            nuevo_alto = max(11.5, min(15.0, nuevo_alto))
-
-            for row in range(data_start, subtotal_row + filas_extra):
-                ws.row_dimensions[row].height = nuevo_alto
-
-            # Si hay muchísimas partidas, bajar un poco el tamaño de letra del cuerpo.
-            if partidas_count >= capacidad:
-                for row in range(data_start, subtotal_row + filas_extra):
-                    for col in range(1, ws.max_column + 1):
-                        cell = ws.cell(row, col)
-                        if isinstance(cell, MergedCell):
-                            continue
-                        try:
-                            current_font = copy(cell.font)
-                            current_font.sz = 7.5
-                            cell.font = current_font
-                        except Exception:
-                            pass
 
     return filas_extra
-
-def celda_real(ws, row: int, col: int):
-    """
-    Devuelve la celda ancla real aunque la coordenada caiga dentro de una celda combinada.
-    """
-    coord = ws.cell(row, col).coordinate
-    return ws[anchor_coord(ws, coord)]
-
-
-def aplicar_formato_partida(ws, row: int, cols: dict[str, int]):
-    """
-    Aplica alineación estable respetando celdas combinadas.
-    """
-    for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
-        cell = celda_real(ws, row, col)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    desc_cell = celda_real(ws, row, cols["descripcion"])
-    desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-
-    for col in [cols["pu"], cols["total"]]:
-        cell = celda_real(ws, row, col)
-        cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
-        cell.number_format = '"$"#,##0.00'
 
 
 # =========================
@@ -873,8 +781,22 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
         set_cell(ws, ws.cell(row, cols["pu"]).coordinate, partida.get("precio_unitario"))
         set_cell(ws, ws.cell(row, cols["total"]).coordinate, f"={ws.cell(row, cols['cantidad']).coordinate}*{ws.cell(row, cols['pu']).coordinate}")
 
-        # Forzar formato estable respetando celdas combinadas.
-        aplicar_formato_partida(ws, row, cols)
+        # Forzar formato estable aunque la plantilla inserte filas extra.
+        # Evita que los últimos productos salgan centrados/desacomodados.
+        for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        desc_cell = ws.cell(row, cols["descripcion"])
+        if not isinstance(desc_cell, MergedCell):
+            desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        for col in [cols["pu"], cols["total"]]:
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+                cell.number_format = '"$"#,##0.00'
 
     # Totales.
     set_cell(ws, ws.cell(subtotal_row, max(1, cols["total"] - 1)).coordinate, "SUBTOTAL")
@@ -933,16 +855,19 @@ def llenar_orden_compra(ws, campos: dict[str, Any], partidas: list[dict[str, Any
         set_cell(ws, f"E{row}", f"=A{row}*D{row}")
 
         for col in [1, 2]:
-            cell = celda_real(ws, row, col)
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-        desc_cell = celda_real(ws, row, 3)
-        desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        desc_cell = ws.cell(row, 3)
+        if not isinstance(desc_cell, MergedCell):
+            desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
         for col in [4, 5]:
-            cell = celda_real(ws, row, col)
-            cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
-            cell.number_format = '"$"#,##0.00'
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+                cell.number_format = '"$"#,##0.00'
 
     set_cell(ws, f"D{subtotal_row}", "SUBTOTAL")
     set_cell(ws, f"E{subtotal_row}", f"=SUM(E{data_start}:E{data_start + len(partidas) - 1})")
@@ -985,6 +910,44 @@ def llenar_orden_compra(ws, campos: dict[str, Any], partidas: list[dict[str, Any
             ws.cell(row, col).number_format = '"$"#,##0.00'
 
 
+def calcular_capacidad_requisicion(ws) -> int:
+    header_row = detectar_header_requisicion(ws)
+    data_start = header_row + 2
+    subtotal_row = find_totals_row(ws, data_start)
+    return max(1, subtotal_row - data_start)
+
+
+def calcular_capacidad_orden_compra(ws) -> int:
+    header_row = detectar_header_oc(ws)
+    data_start = header_row + 1
+    subtotal = find_exact_cell(ws, "SUBTOTAL", start_row=data_start) or find_cell(ws, "SUBTOTAL", start_row=data_start)
+    subtotal_row = subtotal[0] if subtotal else data_start + 20
+    return max(1, subtotal_row - data_start)
+
+
+def dividir_partidas(partidas: list[dict[str, Any]], capacidad: int) -> list[list[dict[str, Any]]]:
+    capacidad = max(1, capacidad)
+    return [partidas[i:i + capacidad] for i in range(0, len(partidas), capacidad)] or [[]]
+
+
+def titulo_hoja_pagina(nombre_base: str, pagina: int, total_paginas: int) -> str:
+    base = nombre_hoja_valido(nombre_base or "Requisicion")
+    if total_paginas <= 1:
+        return base
+    sufijo = f"-{pagina}"
+    return nombre_hoja_valido(base[:31 - len(sufijo)] + sufijo)
+
+
+def aplicar_cierres_visuales_a_xlsx(excel_bytes: bytes, wb, hojas_generadas: list[str]) -> bytes:
+    resultado = excel_bytes
+    for hoja in hojas_generadas:
+        if hoja in wb.sheetnames:
+            cierre_visual = getattr(wb[hoja], "_cierre_visual", None)
+            if cierre_visual:
+                resultado = agregar_cierre_diagonal_xlsx(resultado, hoja, cierre_visual)
+    return resultado
+
+
 def llenar_plantilla(
     plantilla_bytes: bytes,
     hoja_base: str,
@@ -993,23 +956,64 @@ def llenar_plantilla(
     partidas: list[dict[str, Any]],
 ) -> BytesIO:
     wb = load_workbook(BytesIO(plantilla_bytes))
-    ws = wb[hoja_base]
+    ws_base = wb[hoja_base]
 
-    nombre_salida = nombre_hoja_valido(nombre_hoja_salida)
-    if nombre_salida and nombre_salida != ws.title and nombre_salida not in wb.sheetnames:
-        ws.title = nombre_salida
+    tipo = detectar_tipo_plantilla(ws_base)
+    nombre_salida_base = nombre_hoja_valido(nombre_hoja_salida)
 
-    tipo = detectar_tipo_plantilla(ws)
-
+    # En formatos fijos de requisición, si hay más partidas que filas disponibles,
+    # NO se debe forzar todo en una sola hoja porque se mueve la parte inferior.
+    # Se pagina automáticamente en hojas generadas: JAG25-1, JAG25-2, etc.
     if tipo == "orden_compra":
-        llenar_orden_compra(ws, campos, partidas)
+        capacidad_real = calcular_capacidad_orden_compra(ws_base)
     else:
-        llenar_requisicion(ws, campos, partidas)
+        capacidad_real = calcular_capacidad_requisicion(ws_base)
 
-    # Entrega limpia: dejar solo la hoja generada.
-    hoja_generada = ws.title
+    # Reservar una fila para el cierre visual cuando sea posible.
+    capacidad_por_pagina = max(1, capacidad_real - 1)
+
+    if len(partidas) > capacidad_por_pagina:
+        grupos = dividir_partidas(partidas, capacidad_por_pagina)
+    else:
+        grupos = [partidas]
+
+    total_paginas = len(grupos)
+
+    # Crear todas las hojas generadas desde la plantilla limpia antes de llenar datos.
+    hojas = [ws_base]
+    for _ in range(1, total_paginas):
+        hojas.append(wb.copy_worksheet(ws_base))
+
+    hojas_generadas = []
+
+    for idx, (ws, grupo) in enumerate(zip(hojas, grupos), start=1):
+        titulo = titulo_hoja_pagina(nombre_salida_base, idx, total_paginas)
+
+        # Evitar colisiones de nombres.
+        nombre_final = titulo
+        contador = 2
+        while nombre_final in hojas_generadas:
+            nombre_final = nombre_hoja_valido(f"{titulo[:27]}_{contador}")
+            contador += 1
+
+        ws.title = nombre_final
+        hojas_generadas.append(ws.title)
+
+        campos_pagina = dict(campos)
+
+        if total_paginas > 1:
+            # Mantener el folio original visible en la requisición.
+            # El número de página va solo en el nombre de la hoja para no alterar el formato.
+            campos_pagina["folio"] = campos.get("folio", "")
+
+        if tipo == "orden_compra":
+            llenar_orden_compra(ws, campos_pagina, grupo)
+        else:
+            llenar_requisicion(ws, campos_pagina, grupo)
+
+    # Entrega limpia: dejar solo hojas generadas, no plantillas vacías.
     for nombre in list(wb.sheetnames):
-        if nombre != hoja_generada:
+        if nombre not in hojas_generadas:
             wb.remove(wb[nombre])
 
     wb.active = 0
@@ -1025,9 +1029,7 @@ def llenar_plantilla(
     wb.save(salida)
     excel_bytes = salida.getvalue()
 
-    cierre_visual = getattr(ws, "_cierre_visual", None)
-    if cierre_visual:
-        excel_bytes = agregar_cierre_diagonal_xlsx(excel_bytes, ws.title, cierre_visual)
+    excel_bytes = aplicar_cierres_visuales_a_xlsx(excel_bytes, wb, hojas_generadas)
 
     resultado = BytesIO(excel_bytes)
     resultado.seek(0)
@@ -1749,6 +1751,16 @@ if plantilla_bytes:
     else:
         campos_base = leer_campos_requisicion(ws_base)
         st.info("Plantilla tipo Requisición detectada. Se conservarán logos, formato, celdas combinadas, observaciones y firmas.")
+
+        if partidas:
+            capacidad_tmp = max(1, calcular_capacidad_requisicion(ws_base) - 1)
+            if len(partidas) > capacidad_tmp:
+                paginas_tmp = (len(partidas) + capacidad_tmp - 1) // capacidad_tmp
+                st.warning(
+                    f"Esta requisición tiene {len(partidas)} partidas y el formato solo permite "
+                    f"{capacidad_tmp} por hoja sin mover la parte inferior. "
+                    f"Se generarán {paginas_tmp} hojas/páginas automáticamente."
+                )
 else:
     st.warning("No hay plantilla seleccionada. Se generará un Excel simple sin logos ni formato de requisición.")
 
