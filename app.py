@@ -3,7 +3,11 @@ from __future__ import annotations
 from copy import copy
 from io import BytesIO
 from pathlib import Path
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from typing import Any
 
 import streamlit as st
@@ -580,6 +584,69 @@ def llenar_plantilla(
 
 
 # =========================
+# CONVERSIÓN A PDF
+# =========================
+def convertir_excel_a_pdf(excel_bytes: bytes, nombre_base: str) -> BytesIO:
+    """
+    Convierte el Excel generado a PDF usando LibreOffice en modo headless.
+    En Streamlit Cloud se requiere packages.txt con libreoffice-calc.
+    """
+    ejecutable = shutil.which("libreoffice") or shutil.which("soffice")
+    if not ejecutable:
+        raise RuntimeError(
+            "No se encontró LibreOffice en el servidor. "
+            "Agrega un archivo packages.txt con libreoffice-calc y vuelve a desplegar."
+        )
+
+    nombre_seguro = re.sub(r"[^A-Za-z0-9_-]", "_", nombre_base).strip("_") or "REQUISICION"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        carpeta = Path(tmp)
+        entrada = carpeta / f"{nombre_seguro}.xlsx"
+        salida_dir = carpeta / "pdf"
+        salida_dir.mkdir(parents=True, exist_ok=True)
+
+        entrada.write_bytes(excel_bytes)
+
+        env = os.environ.copy()
+        env["HOME"] = str(carpeta)
+
+        comando = [
+            ejecutable,
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(salida_dir),
+            str(entrada),
+        ]
+
+        proceso = subprocess.run(
+            comando,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+
+        pdf_esperado = salida_dir / f"{nombre_seguro}.pdf"
+        if not pdf_esperado.exists():
+            pdfs = list(salida_dir.glob("*.pdf"))
+            if pdfs:
+                pdf_esperado = pdfs[0]
+            else:
+                raise RuntimeError(
+                    "LibreOffice no generó el PDF. "
+                    f"Salida: {proceso.stdout} Error: {proceso.stderr}"
+                )
+
+        resultado = BytesIO(pdf_esperado.read_bytes())
+        resultado.seek(0)
+        return resultado
+
+
+# =========================
 # EXCEL SIMPLE
 # =========================
 def generar_excel_simple(campos: dict[str, Any], partidas: list[dict[str, Any]]) -> BytesIO:
@@ -1094,7 +1161,7 @@ st.sidebar.write("1. Elige Excel o PDF.")
 st.sidebar.write("2. Sube el archivo origen.")
 st.sidebar.write("3. Selecciona una plantilla integrada o sube una propia.")
 st.sidebar.write("4. Edita datos generales.")
-st.sidebar.write("5. Genera y descarga el Excel.")
+st.sidebar.write("5. Genera y descarga el Excel o PDF.")
 st.sidebar.divider()
 st.sidebar.info("La app incluye FORMATOS.xlsx como banco de plantillas.")
 
@@ -1352,13 +1419,36 @@ if st.button("Generar archivo", type="primary"):
                 archivo_generado = generar_excel_simple(campos_finales, partidas)
 
             nombre = re.sub(r"[^A-Z0-9_-]", "_", normalizar_mayus(campo_folio)) or "REQUISICION"
+            excel_bytes_final = archivo_generado.getvalue()
+
             st.success("Archivo generado correctamente.")
-            st.download_button(
-                "Descargar Excel generado",
-                data=archivo_generado,
-                file_name=f"{nombre}_automatico.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+
+            col_excel, col_pdf = st.columns(2)
+
+            with col_excel:
+                st.download_button(
+                    "Descargar Excel generado",
+                    data=excel_bytes_final,
+                    file_name=f"{nombre}_automatico.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+            with col_pdf:
+                try:
+                    pdf_generado = convertir_excel_a_pdf(excel_bytes_final, nombre)
+                    st.download_button(
+                        "Descargar PDF generado",
+                        data=pdf_generado.getvalue(),
+                        file_name=f"{nombre}_automatico.pdf",
+                        mime="application/pdf",
+                    )
+                except Exception as pdf_error:
+                    st.warning(
+                        "Se generó el Excel, pero no se pudo crear el PDF en este servidor. "
+                        "Verifica que packages.txt tenga libreoffice-calc y vuelve a desplegar."
+                    )
+                    with st.expander("Ver detalle del error PDF"):
+                        st.write(str(pdf_error))
         except Exception as e:
             st.error("No se pudo generar el archivo.")
             st.exception(e)
