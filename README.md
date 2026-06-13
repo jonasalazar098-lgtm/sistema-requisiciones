@@ -1,9 +1,14 @@
-# Sistema de requisiciones v19
+# Sistema de requisiciones v20
 
-Cambios sobre v18:
-- La franja gris debajo del último producto ahora es más oscura.
-- La diagonal también queda en gris más oscuro.
-- Mantiene una sola diagonal limpia, sin diagonales pequeñas entre celdas.
+Corrección sobre v19:
+- Corrige que, cuando hay muchas partidas, los últimos productos salgan centrados o desacomodados.
+- Las filas extra ahora copian el formato de una fila normal de producto.
+- Fuerza alineación estable:
+  - cantidades, unidades y códigos centrados.
+  - descripción alineada a la izquierda.
+  - precios e importes a la derecha.
+- Mantiene franja gris oscura debajo del último producto.
+- Mantiene una sola diagonal limpia en el espacio vacío.
 - Mantiene descarga en Excel y PDF.
 
 ## Archivos requeridos

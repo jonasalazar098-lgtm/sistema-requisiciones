@@ -684,9 +684,14 @@ def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count:
     filas_extra = max(0, partidas_count - capacidad)
 
     if filas_extra:
+        # Copiar siempre el formato de una fila normal de artículo.
+        # Antes se copiaba la fila justo antes del subtotal y, en algunos formatos,
+        # esa fila tenía alineación/estilo raro. Por eso los últimos productos
+        # podían salir centrados o desacomodados cuando había muchas partidas.
+        fila_estilo = data_start
         ws.insert_rows(subtotal_row, amount=filas_extra)
         for row in range(subtotal_row, subtotal_row + filas_extra):
-            copy_row_style(ws, max(data_start, subtotal_row - 1), row, ws.max_column)
+            copy_row_style(ws, fila_estilo, row, ws.max_column)
 
     return filas_extra
 
@@ -776,6 +781,23 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
         set_cell(ws, ws.cell(row, cols["pu"]).coordinate, partida.get("precio_unitario"))
         set_cell(ws, ws.cell(row, cols["total"]).coordinate, f"={ws.cell(row, cols['cantidad']).coordinate}*{ws.cell(row, cols['pu']).coordinate}")
 
+        # Forzar formato estable aunque la plantilla inserte filas extra.
+        # Evita que los últimos productos salgan centrados/desacomodados.
+        for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        desc_cell = ws.cell(row, cols["descripcion"])
+        if not isinstance(desc_cell, MergedCell):
+            desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        for col in [cols["pu"], cols["total"]]:
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+                cell.number_format = '"$"#,##0.00'
+
     # Totales.
     set_cell(ws, ws.cell(subtotal_row, max(1, cols["total"] - 1)).coordinate, "SUBTOTAL")
     set_cell(ws, ws.cell(subtotal_row, cols["total"]).coordinate, f"=SUM({ws.cell(data_start, cols['total']).coordinate}:{ws.cell(data_start + len(partidas) - 1, cols['total']).coordinate})")
@@ -831,6 +853,21 @@ def llenar_orden_compra(ws, campos: dict[str, Any], partidas: list[dict[str, Any
         set_cell(ws, f"C{row}", partida.get("descripcion"))
         set_cell(ws, f"D{row}", partida.get("precio_unitario"))
         set_cell(ws, f"E{row}", f"=A{row}*D{row}")
+
+        for col in [1, 2]:
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        desc_cell = ws.cell(row, 3)
+        if not isinstance(desc_cell, MergedCell):
+            desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        for col in [4, 5]:
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+                cell.number_format = '"$"#,##0.00'
 
     set_cell(ws, f"D{subtotal_row}", "SUBTOTAL")
     set_cell(ws, f"E{subtotal_row}", f"=SUM(E{data_start}:E{data_start + len(partidas) - 1})")
