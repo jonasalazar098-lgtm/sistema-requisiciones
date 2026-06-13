@@ -1,12 +1,15 @@
-# Sistema de requisiciones v20
+# Sistema de requisiciones v21
 
-Corrección sobre v19:
-- Corrige que, cuando hay muchas partidas, los últimos productos salgan centrados o desacomodados.
-- Las filas extra ahora copian el formato de una fila normal de producto.
-- Fuerza alineación estable:
-  - cantidades, unidades y códigos centrados.
-  - descripción alineada a la izquierda.
-  - precios e importes a la derecha.
+Corrección sobre v20:
+- Corrige el problema donde, al haber muchas partidas, los últimos productos salían centrados o desacomodados.
+- Antes algunas filas de la parte baja de la tabla conservaban celdas combinadas o estilos raros de la plantilla.
+- Ahora se normaliza toda la zona de partidas antes de escribir:
+  - se descombinan celdas del cuerpo de la tabla.
+  - se limpia todo el cuerpo de partidas.
+  - se reaplica formato estable.
+  - descripciones quedan alineadas a la izquierda.
+  - cantidades, unidades y códigos quedan centrados.
+  - precios e importes quedan a la derecha.
 - Mantiene franja gris oscura debajo del último producto.
 - Mantiene una sola diagonal limpia en el espacio vacío.
 - Mantiene descarga en Excel y PDF.

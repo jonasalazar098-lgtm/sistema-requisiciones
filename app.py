@@ -18,7 +18,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.drawing.image import Image as ExcelImage
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 from PIL import Image as PILImage, ImageDraw
 
 try:
@@ -696,6 +696,51 @@ def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count:
     return filas_extra
 
 
+def normalizar_filas_partidas(ws, data_start: int, data_end: int, cols: dict[str, int]):
+    """
+    Cuando la requisición trae muchas partidas, algunas plantillas tienen celdas
+    combinadas o alineaciones raras en la parte baja de la tabla. Esta función
+    deja toda la zona de artículos con estructura normal antes de escribir datos.
+    """
+    if data_end < data_start:
+        return
+
+    col_inicio = min(cols["par"], cols["cantidad"], cols["unidad"], cols["descripcion"], cols["codigo"], cols["pu"], cols["total"])
+    col_fin = max(cols["par"], cols["cantidad"], cols["unidad"], cols["descripcion"], cols["codigo"], cols["pu"], cols["total"])
+
+    # Descombinar solo dentro del cuerpo de partidas. No tocar encabezados ni firmas.
+    for rango in list(ws.merged_cells.ranges):
+        min_col, min_row, max_col, max_row = range_boundaries(str(rango))
+        intersecta_filas = not (max_row < data_start or min_row > data_end)
+        intersecta_cols = not (max_col < col_inicio or min_col > col_fin)
+        if intersecta_filas and intersecta_cols:
+            try:
+                ws.unmerge_cells(str(rango))
+            except Exception:
+                pass
+
+    # Reaplicar estilo de una fila normal a todas las filas de partidas.
+    fila_estilo = data_start
+    for row in range(data_start, data_end + 1):
+        copy_row_style(ws, fila_estilo, row, ws.max_column)
+
+        # Alineaciones estables por columna.
+        for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        desc_cell = ws.cell(row, cols["descripcion"])
+        if not isinstance(desc_cell, MergedCell):
+            desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        for col in [cols["pu"], cols["total"]]:
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+                cell.number_format = '"$"#,##0.00'
+
+
 # =========================
 # LLENAR PLANTILLAS
 # =========================
@@ -764,8 +809,12 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
     iva_row = subtotal_row + 1
     total_row = subtotal_row + 2
 
-    # Limpiar rango de partidas, sin tocar la estructura.
-    for row in range(data_start, data_start + len(partidas)):
+    # Normalizar toda la zona de artículos para evitar que los últimos productos
+    # salgan centrados o combinados cuando hay muchas partidas.
+    normalizar_filas_partidas(ws, data_start, subtotal_row - 1, cols)
+
+    # Limpiar toda la zona de partidas, sin tocar subtotal/firma/observaciones.
+    for row in range(data_start, subtotal_row):
         for col in [cols["par"], 2, cols["cantidad"], cols["unidad"], cols["descripcion"], cols["codigo"], cols["pu"], cols["total"]]:
             if col <= ws.max_column:
                 set_cell(ws, ws.cell(row, col).coordinate, None)
