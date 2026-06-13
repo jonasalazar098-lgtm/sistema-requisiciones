@@ -18,6 +18,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.drawing.image import Image as ExcelImage
+from openpyxl.utils import get_column_letter
 from PIL import Image as PILImage, ImageDraw
 
 try:
@@ -209,7 +210,9 @@ def _reemplazar_borde(
 
 
 def _ancho_columna_px(ws, col: int) -> int:
-    letra = ws.cell(1, col).column_letter
+    # No usar ws.cell(1, col).column_letter porque si la celda está combinada
+    # puede ser MergedCell y provocar error. get_column_letter funciona siempre.
+    letra = get_column_letter(col)
     ancho = ws.column_dimensions[letra].width
     if ancho is None:
         ancho = 8.43

@@ -1,11 +1,13 @@
-# Sistema de requisiciones v15
+# Sistema de requisiciones v16
 
-Cambios sobre v14:
-- Refuerza el cierre visual.
-- Agrega línea gris fuerte después del último artículo.
-- Agrega diagonal como shape/dibujo interno del XLSX.
-- Agrega diagonales por celdas como respaldo para que se vean también en PDF.
-- El PDF se genera desde el mismo Excel final.
+Corrección sobre v15:
+- Corrige el error:
+  AttributeError: 'MergedCell' object has no attribute 'column_letter'
+- Mantiene el cierre visual:
+  - línea gris debajo del último producto.
+  - diagonal en el espacio vacío.
+- Mantiene descarga en Excel y PDF.
+- El PDF se genera desde el Excel final.
 
 ## Archivos requeridos
 
@@ -28,4 +30,5 @@ python -m streamlit run app.py
 
 ## Nota
 
-Después de subir a GitHub, reinicia la app en Streamlit Cloud para forzar que use el app.py nuevo.
+Después de subir a GitHub, reiniciar la app en Streamlit Cloud:
+Manage app > Reboot app
