@@ -1,16 +1,15 @@
-# Sistema de requisiciones v22
+# Sistema de requisiciones v23
 
-Corrección sobre v21:
-- Revierte el cambio que rompía las líneas de la tabla.
-- Corrige los últimos productos cuando hay muchas partidas sin desarmar toda la plantilla.
-- Rehace únicamente el área combinada de DESCRIPCIÓN por fila.
+Corrección sobre v22:
+- Se revierte el cambio que rompía las líneas de la tabla.
+- No descombina el cuerpo completo de la requisición.
+- Respeta la estructura original de la plantilla.
+- Corrige la alineación usando la celda ancla real cuando hay celdas combinadas.
 - Mantiene:
-  - descripciones alineadas a la izquierda.
-  - cantidades/unidad/código centrados.
-  - precios e importes a la derecha.
   - franja gris oscura debajo del último producto.
-  - una sola diagonal limpia en el espacio vacío.
+  - una sola diagonal limpia.
   - descarga en Excel y PDF.
+  - filas de la tabla con líneas normales.
 
 ## Archivos requeridos
 

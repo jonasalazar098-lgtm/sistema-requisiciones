@@ -18,7 +18,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.drawing.image import Image as ExcelImage
-from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.utils import get_column_letter
 from PIL import Image as PILImage, ImageDraw
 
 try:
@@ -685,6 +685,8 @@ def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count:
 
     if filas_extra:
         # Copiar siempre el formato de una fila normal de artículo.
+        # No copiar la fila previa al subtotal porque algunas plantillas tienen
+        # estilos raros en esa zona.
         fila_estilo = data_start
         ws.insert_rows(subtotal_row, amount=filas_extra)
         for row in range(subtotal_row, subtotal_row + filas_extra):
@@ -695,7 +697,8 @@ def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count:
 
 def celda_real(ws, row: int, col: int):
     """
-    Devuelve la celda ancla real aunque la coordenada caiga dentro de una celda combinada.
+    Devuelve la celda ancla real aunque la coordenada esté dentro de una celda combinada.
+    Esto permite alinear textos sin romper las líneas ni descombinar la plantilla.
     """
     coord = ws.cell(row, col).coordinate
     return ws[anchor_coord(ws, coord)]
@@ -703,7 +706,7 @@ def celda_real(ws, row: int, col: int):
 
 def aplicar_formato_partida(ws, row: int, cols: dict[str, int]):
     """
-    Aplica alineación estable a una fila de partida respetando celdas combinadas.
+    Aplica formato estable respetando la estructura original de la plantilla.
     """
     for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
         cell = celda_real(ws, row, col)
@@ -716,47 +719,6 @@ def aplicar_formato_partida(ws, row: int, cols: dict[str, int]):
         cell = celda_real(ws, row, col)
         cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
         cell.number_format = '"$"#,##0.00'
-
-
-def preparar_estructura_tabla_requisicion(ws, data_start: int, data_end: int, cols: dict[str, int]):
-    """
-    Corrige la estructura de la tabla cuando hay muchas partidas:
-    - No rompe el diseño completo.
-    - Rehace únicamente el rango combinado de DESCRIPCIÓN por fila.
-    - Evita que las últimas descripciones se vayan centradas o desacomodadas.
-    """
-    if data_end < data_start:
-        return
-
-    desc_inicio = cols["descripcion"]
-    desc_fin = max(desc_inicio, cols["codigo"] - 1)
-
-    # Solo tocar combinaciones que intersectan el bloque de descripción del cuerpo de partidas.
-    for rango in list(ws.merged_cells.ranges):
-        min_col, min_row, max_col, max_row = range_boundaries(str(rango))
-        intersecta_filas = not (max_row < data_start or min_row > data_end)
-        intersecta_desc = not (max_col < desc_inicio or min_col > desc_fin)
-        if intersecta_filas and intersecta_desc:
-            try:
-                ws.unmerge_cells(str(rango))
-            except Exception:
-                pass
-
-    # Rehacer el merge de descripción por cada fila, igual que la plantilla original.
-    if desc_fin > desc_inicio:
-        for row in range(data_start, data_end + 1):
-            try:
-                ws.merge_cells(
-                    start_row=row,
-                    start_column=desc_inicio,
-                    end_row=row,
-                    end_column=desc_fin,
-                )
-            except Exception:
-                pass
-
-    for row in range(data_start, data_end + 1):
-        aplicar_formato_partida(ws, row, cols)
 
 
 # =========================
@@ -827,9 +789,6 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
     iva_row = subtotal_row + 1
     total_row = subtotal_row + 2
 
-    # Preparar estructura del cuerpo de la tabla sin romper las líneas.
-    preparar_estructura_tabla_requisicion(ws, data_start, subtotal_row - 1, cols)
-
     # Limpiar rango de partidas, sin tocar la estructura.
     for row in range(data_start, data_start + len(partidas)):
         for col in [cols["par"], 2, cols["cantidad"], cols["unidad"], cols["descripcion"], cols["codigo"], cols["pu"], cols["total"]]:
@@ -847,7 +806,7 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
         set_cell(ws, ws.cell(row, cols["pu"]).coordinate, partida.get("precio_unitario"))
         set_cell(ws, ws.cell(row, cols["total"]).coordinate, f"={ws.cell(row, cols['cantidad']).coordinate}*{ws.cell(row, cols['pu']).coordinate}")
 
-        # Forzar formato estable respetando celdas combinadas.
+        # Forzar formato estable sin descombinar la tabla.
         aplicar_formato_partida(ws, row, cols)
 
     # Totales.
@@ -907,19 +866,16 @@ def llenar_orden_compra(ws, campos: dict[str, Any], partidas: list[dict[str, Any
         set_cell(ws, f"E{row}", f"=A{row}*D{row}")
 
         for col in [1, 2]:
-            cell = ws.cell(row, col)
-            if not isinstance(cell, MergedCell):
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell = celda_real(ws, row, col)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-        desc_cell = ws.cell(row, 3)
-        if not isinstance(desc_cell, MergedCell):
-            desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        desc_cell = celda_real(ws, row, 3)
+        desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
         for col in [4, 5]:
-            cell = ws.cell(row, col)
-            if not isinstance(cell, MergedCell):
-                cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
-                cell.number_format = '"$"#,##0.00'
+            cell = celda_real(ws, row, col)
+            cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+            cell.number_format = '"$"#,##0.00'
 
     set_cell(ws, f"D{subtotal_row}", "SUBTOTAL")
     set_cell(ws, f"E{subtotal_row}", f"=SUM(E{data_start}:E{data_start + len(partidas) - 1})")
