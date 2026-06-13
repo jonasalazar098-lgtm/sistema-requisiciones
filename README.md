@@ -1,10 +1,11 @@
-# Sistema de requisiciones v12
+# Sistema de requisiciones v14
 
-Cambios sobre v11:
-- Mantiene la descarga del Excel generado.
-- Agrega botón para descargar el PDF generado a partir del Excel final.
-- El PDF se genera con LibreOffice en modo headless.
-- Se agrega packages.txt con libreoffice-calc para Streamlit Community Cloud.
+Cambios sobre v13:
+- Corrige el cierre visual para que sí aparezca en Excel y PDF.
+- La diagonal ahora se inserta como imagen transparente sobre el espacio vacío.
+- Mantiene la línea gris después del último artículo.
+- El PDF se genera desde el mismo Excel final, por eso ambos deben verse iguales.
+- Mantiene packages.txt con libreoffice-calc para Streamlit Community Cloud.
 
 ## Archivos requeridos
 
@@ -25,16 +26,6 @@ pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-## Nota para PDF
+## Nota
 
-Para que el PDF funcione en Streamlit Cloud, el repositorio debe incluir:
-
-```txt
-packages.txt
-```
-
-con este contenido:
-
-```txt
-libreoffice-calc
-```
+Si una requisición llena casi todas las filas disponibles, puede quedar solo la línea gris y poca o ninguna diagonal porque ya no queda espacio vacío que cerrar. En requisiciones con espacio libre, aparece la diagonal sobre ese espacio.
