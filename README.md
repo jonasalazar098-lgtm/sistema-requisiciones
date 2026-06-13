@@ -1,13 +1,9 @@
-# Sistema de requisiciones v16
+# Sistema de requisiciones v17
 
-Corrección sobre v15:
-- Corrige el error:
-  AttributeError: 'MergedCell' object has no attribute 'column_letter'
-- Mantiene el cierre visual:
-  - línea gris debajo del último producto.
-  - diagonal en el espacio vacío.
-- Mantiene descarga en Excel y PDF.
-- El PDF se genera desde el Excel final.
+Corrección sobre v16:
+- Agrega una franja gris visible justo debajo del último producto.
+- Mantiene la diagonal en el espacio vacío restante.
+- El cierre visual se aplica en el Excel y también aparece en el PDF porque el PDF se genera desde el Excel final.
 
 ## Archivos requeridos
 

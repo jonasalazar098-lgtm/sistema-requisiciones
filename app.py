@@ -253,43 +253,51 @@ def _crear_imagen_diagonal(ws, meta: dict[str, int]) -> str:
 def marcar_cierre_tabla(ws, primera_fila_vacia: int, ultima_fila_vacia: int, col_inicio: int, col_fin: int):
     """
     Cierre visual de la orden:
-    - Línea gris inmediatamente después del último artículo.
+    - Franja gris inmediatamente debajo del último producto.
     - Diagonal sobre el espacio vacío restante.
 
-    Esta versión usa 3 capas para que sea robusto:
-    1) borde gris en la fila de cierre,
-    2) diagonales de borde en celdas como respaldo,
-    3) shape/dibujo diagonal dentro del XLSX al guardar.
+    Se aplica antes de generar el Excel. El PDF se crea desde ese mismo Excel,
+    por eso ambos documentos deben verse igual.
     """
-    gris = Side(style="medium", color="808080")
+    gris_borde = Side(style="medium", color="808080")
     gris_delgado = Side(style="thin", color="808080")
+    relleno_gris = PatternFill("solid", fgColor="D9D9D9")
 
     fila_ultimo_articulo = max(1, primera_fila_vacia - 1)
+    fila_franja = primera_fila_vacia
+    fila_inicio_diagonal = primera_fila_vacia + 1
 
-    # Línea gris fuerte justo después del último artículo.
+    # 1) Línea gris/borde debajo del último artículo.
     for col in range(col_inicio, col_fin + 1):
         celda_ultimo = ws.cell(fila_ultimo_articulo, col)
         if not isinstance(celda_ultimo, MergedCell):
-            celda_ultimo.border = _reemplazar_borde(celda_ultimo.border, bottom=gris)
+            celda_ultimo.border = _reemplazar_borde(celda_ultimo.border, bottom=gris_borde)
 
-    # Si no hay espacio vacío, solo se deja la línea gris.
-    if primera_fila_vacia > ultima_fila_vacia:
+    # 2) Franja gris visible justo debajo del último producto.
+    if fila_franja <= ultima_fila_vacia:
+        for col in range(col_inicio, col_fin + 1):
+            celda = ws.cell(fila_franja, col)
+            if not isinstance(celda, MergedCell):
+                celda.fill = relleno_gris
+                celda.value = None
+                celda.border = _reemplazar_borde(
+                    celda.border,
+                    top=gris_borde,
+                    bottom=gris_borde,
+                )
+
+    # Si no queda espacio después de la franja gris, no hay dónde poner diagonal.
+    if fila_inicio_diagonal > ultima_fila_vacia:
         ws._cierre_visual = None
         return
 
-    # Línea gris en la primera fila vacía.
-    for col in range(col_inicio, col_fin + 1):
-        celda_inicio = ws.cell(primera_fila_vacia, col)
-        if not isinstance(celda_inicio, MergedCell):
-            celda_inicio.border = _reemplazar_borde(celda_inicio.border, top=gris)
-
-    # Respaldo: dibuja una diagonal por celdas, visible en Excel y PDF aunque fallen shapes.
-    total_filas = max(1, ultima_fila_vacia - primera_fila_vacia + 1)
+    # 3) Respaldo: diagonal por celdas para que se vea aunque el visor ignore shapes.
+    total_filas = max(1, ultima_fila_vacia - fila_inicio_diagonal + 1)
     total_cols = max(1, col_fin - col_inicio + 1)
 
-    for r in range(primera_fila_vacia, ultima_fila_vacia + 1):
-        progreso = (r - primera_fila_vacia) / max(1, total_filas - 1)
-        # abajo izquierda -> arriba derecha: conforme baja la fila, va hacia columnas iniciales
+    for r in range(fila_inicio_diagonal, ultima_fila_vacia + 1):
+        progreso = (r - fila_inicio_diagonal) / max(1, total_filas - 1)
+        # De abajo-izquierda a arriba-derecha: al bajar la fila, la diagonal va hacia columnas iniciales.
         col_centro = int(round(col_fin - progreso * (total_cols - 1)))
         for c in range(max(col_inicio, col_centro - 1), min(col_fin, col_centro + 1) + 1):
             celda = ws.cell(r, c)
@@ -302,10 +310,11 @@ def marcar_cierre_tabla(ws, primera_fila_vacia: int, ultima_fila_vacia: int, col
                 )
 
     width_px = sum(_ancho_columna_px(ws, c) for c in range(col_inicio, col_fin + 1))
-    height_px = sum(_alto_fila_px(ws, r) for r in range(primera_fila_vacia, ultima_fila_vacia + 1))
+    height_px = sum(_alto_fila_px(ws, r) for r in range(fila_inicio_diagonal, ultima_fila_vacia + 1))
 
+    # 4) Diagonal principal como dibujo interno del XLSX.
     ws._cierre_visual = {
-        "first_blank_row": primera_fila_vacia,
+        "first_blank_row": fila_inicio_diagonal,
         "last_blank_row": ultima_fila_vacia,
         "start_col": col_inicio,
         "end_col": col_fin,
