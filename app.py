@@ -705,15 +705,27 @@ def copiar_merges_de_fila(ws, source_row: int, target_row: int):
             pass
 
 
+def _alto_fila_excel(ws, row: int) -> float:
+    alto = ws.row_dimensions[row].height
+    if alto is None:
+        return 15.0
+    try:
+        return float(alto)
+    except Exception:
+        return 15.0
+
+
 def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count: int):
     capacidad = subtotal_row - data_start
     filas_extra = max(0, partidas_count - capacidad)
 
-    if filas_extra:
-        # Usar como modelo una fila normal de producto, no la fila cerca del subtotal.
-        fila_estilo = data_start
+    # Alto físico original disponible para el cuerpo de la tabla.
+    # Si hay demasiadas partidas, se reparte ese mismo espacio entre más filas
+    # para no empujar/desacomodar observaciones, firmas y parte inferior.
+    alto_original_total = sum(_alto_fila_excel(ws, r) for r in range(data_start, subtotal_row))
 
-        # Guardar altura y merges de la fila modelo antes de insertar.
+    if filas_extra:
+        fila_estilo = data_start
         altura_modelo = ws.row_dimensions[fila_estilo].height
 
         ws.insert_rows(subtotal_row, amount=filas_extra)
@@ -724,8 +736,32 @@ def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count:
             if altura_modelo is not None:
                 ws.row_dimensions[row].height = altura_modelo
 
-    return filas_extra
+        # Comprimir un poco todas las filas de artículos para que el bloque inferior
+        # conserve su posición visual en el PDF.
+        nuevo_total_filas = capacidad + filas_extra
+        if nuevo_total_filas > 0:
+            nuevo_alto = alto_original_total / nuevo_total_filas
+            # Evitar que quede ilegible.
+            nuevo_alto = max(11.5, min(15.0, nuevo_alto))
 
+            for row in range(data_start, subtotal_row + filas_extra):
+                ws.row_dimensions[row].height = nuevo_alto
+
+            # Si hay muchísimas partidas, bajar un poco el tamaño de letra del cuerpo.
+            if partidas_count >= capacidad:
+                for row in range(data_start, subtotal_row + filas_extra):
+                    for col in range(1, ws.max_column + 1):
+                        cell = ws.cell(row, col)
+                        if isinstance(cell, MergedCell):
+                            continue
+                        try:
+                            current_font = copy(cell.font)
+                            current_font.sz = 7.5
+                            cell.font = current_font
+                        except Exception:
+                            pass
+
+    return filas_extra
 
 def celda_real(ws, row: int, col: int):
     """

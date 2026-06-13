@@ -1,13 +1,19 @@
-# Sistema de requisiciones v24
+# Sistema de requisiciones v25
 
-Corrección sobre v23:
-- Se regresa a la base estable de la tabla.
-- Corrige filas extra cuando hay muchas partidas copiando también las celdas combinadas de una fila normal.
-- Evita que los últimos productos salgan desacomodados o sin estructura.
-- Respeta las líneas y celdas de la plantilla.
+Corrección sobre v24:
+- Corrige que, cuando hay muchas partidas, la parte inferior de la requisición se desacomode.
+- Si hay más productos que filas disponibles, la app inserta filas pero comprime ligeramente la altura del cuerpo de productos.
+- Esto evita que se pierdan o se deformen secciones inferiores como:
+  - Observaciones.
+  - Facturar a.
+  - Recibe.
+  - Entregar en.
+  - Firmas.
 - Mantiene:
-  - franja gris oscura debajo del último producto.
-  - una sola diagonal limpia.
+  - líneas normales de la tabla.
+  - descripciones alineadas correctamente.
+  - franja gris oscura debajo del último producto cuando hay espacio.
+  - una sola diagonal limpia cuando queda espacio vacío.
   - descarga en Excel y PDF.
 
 ## Archivos requeridos
