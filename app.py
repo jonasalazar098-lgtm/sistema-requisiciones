@@ -4,10 +4,13 @@ from copy import copy
 from io import BytesIO
 from pathlib import Path
 import os
+import posixpath
 import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
 from typing import Any
 
 import streamlit as st
@@ -177,6 +180,249 @@ def copy_row_style(ws, source_row: int, target_row: int, max_col: int):
             target.number_format = source.number_format
             target.protection = copy(source.protection)
             target.alignment = copy(source.alignment)
+
+
+def _reemplazar_borde(
+    borde_actual: Border,
+    left=None,
+    right=None,
+    top=None,
+    bottom=None,
+    diagonal=None,
+    diagonal_up=None,
+    diagonal_down=None,
+) -> Border:
+    return Border(
+        left=left if left is not None else borde_actual.left,
+        right=right if right is not None else borde_actual.right,
+        top=top if top is not None else borde_actual.top,
+        bottom=bottom if bottom is not None else borde_actual.bottom,
+        diagonal=diagonal if diagonal is not None else borde_actual.diagonal,
+        diagonalUp=diagonal_up if diagonal_up is not None else borde_actual.diagonalUp,
+        diagonalDown=diagonal_down if diagonal_down is not None else borde_actual.diagonalDown,
+        outline=borde_actual.outline,
+        vertical=borde_actual.vertical,
+        horizontal=borde_actual.horizontal,
+    )
+
+
+def marcar_cierre_tabla(ws, primera_fila_vacia: int, ultima_fila_vacia: int, col_inicio: int, col_fin: int):
+    """
+    Marca visualmente el cierre de la orden:
+    - Línea gris inmediatamente después del último artículo.
+    - Diagonal sobre el bloque vacío restante para impedir agregar artículos manualmente.
+    La diagonal se inserta como dibujo dentro del XLSX al guardar, para que Excel y PDF salgan iguales.
+    """
+    if primera_fila_vacia > ultima_fila_vacia:
+        return
+
+    gris = Side(style="medium", color="808080")
+
+    # Línea gris después del último artículo.
+    fila_ultimo_articulo = max(1, primera_fila_vacia - 1)
+    for col in range(col_inicio, col_fin + 1):
+        celda_ultimo = ws.cell(fila_ultimo_articulo, col)
+        if not isinstance(celda_ultimo, MergedCell):
+            celda_ultimo.border = _reemplazar_borde(celda_ultimo.border, bottom=gris)
+
+        celda_inicio = ws.cell(primera_fila_vacia, col)
+        if not isinstance(celda_inicio, MergedCell):
+            celda_inicio.border = _reemplazar_borde(celda_inicio.border, top=gris)
+
+    # Guardar datos para agregar la diagonal como shape al XLSX después de guardar.
+    ws._cierre_visual = {
+        "first_blank_row": primera_fila_vacia,
+        "last_blank_row": ultima_fila_vacia,
+        "start_col": col_inicio,
+        "end_col": col_fin,
+    }
+
+
+def _normalizar_target(base_path: str, target: str) -> str:
+    if target.startswith("/"):
+        return target.lstrip("/")
+    return posixpath.normpath(posixpath.join(posixpath.dirname(base_path), target))
+
+
+def _siguiente_rid(rels_root) -> str:
+    usados = []
+    for rel in rels_root:
+        rid = rel.attrib.get("Id", "")
+        m = re.match(r"rId(\d+)$", rid)
+        if m:
+            usados.append(int(m.group(1)))
+    return f"rId{(max(usados) + 1) if usados else 1}"
+
+
+def _siguiente_drawing_path(nombres_zip: set[str]) -> str:
+    usados = []
+    for nombre in nombres_zip:
+        m = re.match(r"xl/drawings/drawing(\d+)\.xml$", nombre)
+        if m:
+            usados.append(int(m.group(1)))
+    n = (max(usados) + 1) if usados else 1
+    return f"xl/drawings/drawing{n}.xml"
+
+
+def _max_cnvpr_id(drawing_root) -> int:
+    max_id = 1
+    for elem in drawing_root.iter():
+        if elem.tag.endswith("cNvPr"):
+            try:
+                max_id = max(max_id, int(elem.attrib.get("id", "1")))
+            except ValueError:
+                pass
+    return max_id
+
+
+def _crear_anchor_diagonal(meta: dict[str, int], shape_id: int):
+    ns_xdr = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+    ns_a = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+    anchor = ET.Element(f"{{{ns_xdr}}}twoCellAnchor", {"editAs": "twoCell"})
+
+    desde = ET.SubElement(anchor, f"{{{ns_xdr}}}from")
+    ET.SubElement(desde, f"{{{ns_xdr}}}col").text = str(meta["start_col"] - 1)
+    ET.SubElement(desde, f"{{{ns_xdr}}}colOff").text = "0"
+    ET.SubElement(desde, f"{{{ns_xdr}}}row").text = str(meta["first_blank_row"] - 1)
+    ET.SubElement(desde, f"{{{ns_xdr}}}rowOff").text = "0"
+
+    hasta = ET.SubElement(anchor, f"{{{ns_xdr}}}to")
+    ET.SubElement(hasta, f"{{{ns_xdr}}}col").text = str(meta["end_col"])
+    ET.SubElement(hasta, f"{{{ns_xdr}}}colOff").text = "0"
+    ET.SubElement(hasta, f"{{{ns_xdr}}}row").text = str(meta["last_blank_row"])
+    ET.SubElement(hasta, f"{{{ns_xdr}}}rowOff").text = "0"
+
+    sp = ET.SubElement(anchor, f"{{{ns_xdr}}}sp", {"macro": "", "textlink": ""})
+    nv = ET.SubElement(sp, f"{{{ns_xdr}}}nvSpPr")
+    ET.SubElement(nv, f"{{{ns_xdr}}}cNvPr", {"id": str(shape_id), "name": "Cierre diagonal"})
+    ET.SubElement(nv, f"{{{ns_xdr}}}cNvSpPr")
+
+    sppr = ET.SubElement(sp, f"{{{ns_xdr}}}spPr")
+    # flipV hace que la línea vaya de abajo-izquierda a arriba-derecha dentro del rectángulo.
+    xfrm = ET.SubElement(sppr, f"{{{ns_a}}}xfrm", {"flipV": "1"})
+    ET.SubElement(xfrm, f"{{{ns_a}}}off", {"x": "0", "y": "0"})
+    ET.SubElement(xfrm, f"{{{ns_a}}}ext", {"cx": "0", "cy": "0"})
+
+    geom = ET.SubElement(sppr, f"{{{ns_a}}}prstGeom", {"prst": "line"})
+    ET.SubElement(geom, f"{{{ns_a}}}avLst")
+
+    ln = ET.SubElement(sppr, f"{{{ns_a}}}ln", {"w": "19050", "cap": "flat"})
+    fill = ET.SubElement(ln, f"{{{ns_a}}}solidFill")
+    ET.SubElement(fill, f"{{{ns_a}}}srgbClr", {"val": "808080"})
+
+    ET.SubElement(anchor, f"{{{ns_xdr}}}clientData")
+    return anchor
+
+
+def agregar_cierre_diagonal_xlsx(excel_bytes: bytes, sheet_name: str, meta: dict[str, int]) -> bytes:
+    """
+    Inserta una línea diagonal real en la hoja generada modificando el XML interno del XLSX.
+    Así el resultado se ve igual en Excel y en el PDF convertido por LibreOffice.
+    """
+    if not meta:
+        return excel_bytes
+
+    ET.register_namespace("r", "http://schemas.openxmlformats.org/officeDocument/2006/relationships")
+    ET.register_namespace("xdr", "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing")
+    ET.register_namespace("a", "http://schemas.openxmlformats.org/drawingml/2006/main")
+
+    ns_main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    ns_rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    ns_pkg_rel = "http://schemas.openxmlformats.org/package/2006/relationships"
+    ns_ct = "http://schemas.openxmlformats.org/package/2006/content-types"
+    ns_xdr = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+
+    with zipfile.ZipFile(BytesIO(excel_bytes), "r") as zin:
+        archivos = {name: zin.read(name) for name in zin.namelist()}
+
+    nombres = set(archivos.keys())
+
+    workbook_root = ET.fromstring(archivos["xl/workbook.xml"])
+    sheet_rid = None
+    for sheet in workbook_root.findall(f".//{{{ns_main}}}sheet"):
+        if sheet.attrib.get("name") == sheet_name:
+            sheet_rid = sheet.attrib.get(f"{{{ns_rel}}}id")
+            break
+
+    if not sheet_rid:
+        return excel_bytes
+
+    wb_rels_root = ET.fromstring(archivos["xl/_rels/workbook.xml.rels"])
+    sheet_path = None
+    for rel in wb_rels_root:
+        if rel.attrib.get("Id") == sheet_rid:
+            target = rel.attrib.get("Target", "")
+            sheet_path = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join("xl", target))
+            break
+
+    if not sheet_path or sheet_path not in archivos:
+        return excel_bytes
+
+    sheet_root = ET.fromstring(archivos[sheet_path])
+    drawing_elem = sheet_root.find(f"{{{ns_main}}}drawing")
+
+    rels_path = posixpath.join(posixpath.dirname(sheet_path), "_rels", posixpath.basename(sheet_path) + ".rels")
+    if rels_path in archivos:
+        sheet_rels_root = ET.fromstring(archivos[rels_path])
+    else:
+        sheet_rels_root = ET.Element("Relationships", {"xmlns": ns_pkg_rel})
+
+    drawing_path = None
+    if drawing_elem is not None:
+        drawing_rid = drawing_elem.attrib.get(f"{{{ns_rel}}}id")
+        for rel in sheet_rels_root:
+            if rel.attrib.get("Id") == drawing_rid:
+                drawing_path = _normalizar_target(sheet_path, rel.attrib.get("Target", ""))
+                break
+
+    if drawing_path and drawing_path in archivos:
+        drawing_root = ET.fromstring(archivos[drawing_path])
+    else:
+        drawing_path = _siguiente_drawing_path(nombres)
+        drawing_root = ET.Element(f"{{{ns_xdr}}}wsDr")
+
+        nuevo_rid = _siguiente_rid(sheet_rels_root)
+        ET.SubElement(
+            sheet_rels_root,
+            "Relationship",
+            {
+                "Id": nuevo_rid,
+                "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+                "Target": posixpath.relpath(drawing_path, posixpath.dirname(sheet_path)),
+            },
+        )
+        drawing_elem = ET.Element(f"{{{ns_main}}}drawing", {f"{{{ns_rel}}}id": nuevo_rid})
+        sheet_root.append(drawing_elem)
+
+        # Agregar ContentType si es un dibujo nuevo.
+        ct_root = ET.fromstring(archivos["[Content_Types].xml"])
+        parte = "/" + drawing_path
+        existe = any(elem.attrib.get("PartName") == parte for elem in ct_root.findall(f"{{{ns_ct}}}Override"))
+        if not existe:
+            ET.SubElement(
+                ct_root,
+                f"{{{ns_ct}}}Override",
+                {
+                    "PartName": parte,
+                    "ContentType": "application/vnd.openxmlformats-officedocument.drawing+xml",
+                },
+            )
+        archivos["[Content_Types].xml"] = ET.tostring(ct_root, encoding="utf-8", xml_declaration=True)
+
+    shape_id = _max_cnvpr_id(drawing_root) + 1
+    drawing_root.append(_crear_anchor_diagonal(meta, shape_id))
+
+    archivos[drawing_path] = ET.tostring(drawing_root, encoding="utf-8", xml_declaration=True)
+    archivos[rels_path] = ET.tostring(sheet_rels_root, encoding="utf-8", xml_declaration=True)
+    archivos[sheet_path] = ET.tostring(sheet_root, encoding="utf-8", xml_declaration=True)
+
+    salida = BytesIO()
+    with zipfile.ZipFile(salida, "w", zipfile.ZIP_DEFLATED) as zout:
+        for nombre, datos in archivos.items():
+            zout.writestr(nombre, datos)
+
+    return salida.getvalue()
 
 
 # =========================
@@ -474,6 +720,14 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
         for col in [cols["pu"], cols["total"]]:
             ws.cell(row, col).number_format = '"$"#,##0.00'
 
+    marcar_cierre_tabla(
+        ws,
+        primera_fila_vacia=data_start + len(partidas),
+        ultima_fila_vacia=subtotal_row - 1,
+        col_inicio=cols["par"],
+        col_fin=cols["total"],
+    )
+
     aplicar_campos_requisicion(ws, campos)
 
 
@@ -536,6 +790,14 @@ def llenar_orden_compra(ws, campos: dict[str, Any], partidas: list[dict[str, Any
     write_right_of_label(ws, "USO", campos.get("uso", ""), 1)
     write_right_of_label(ws, "ENTREGAR EN", campos.get("entregar_en", ""), 1)
 
+    marcar_cierre_tabla(
+        ws,
+        primera_fila_vacia=data_start + len(partidas),
+        ultima_fila_vacia=subtotal_row - 1,
+        col_inicio=1,
+        col_fin=5,
+    )
+
     for row in range(data_start, subtotal_row + 8):
         for col in [4, 5]:
             ws.cell(row, col).number_format = '"$"#,##0.00'
@@ -579,8 +841,15 @@ def llenar_plantilla(
 
     salida = BytesIO()
     wb.save(salida)
-    salida.seek(0)
-    return salida
+    excel_bytes = salida.getvalue()
+
+    cierre_visual = getattr(ws, "_cierre_visual", None)
+    if cierre_visual:
+        excel_bytes = agregar_cierre_diagonal_xlsx(excel_bytes, ws.title, cierre_visual)
+
+    resultado = BytesIO(excel_bytes)
+    resultado.seek(0)
+    return resultado
 
 
 # =========================
@@ -732,8 +1001,15 @@ def generar_excel_simple(campos: dict[str, Any], partidas: list[dict[str, Any]])
 
     salida = BytesIO()
     wb.save(salida)
-    salida.seek(0)
-    return salida
+    excel_bytes = salida.getvalue()
+
+    cierre_visual = getattr(ws, "_cierre_visual", None)
+    if cierre_visual:
+        excel_bytes = agregar_cierre_diagonal_xlsx(excel_bytes, ws.title, cierre_visual)
+
+    resultado = BytesIO(excel_bytes)
+    resultado.seek(0)
+    return resultado
 
 
 # =========================
@@ -1161,7 +1437,7 @@ st.sidebar.write("1. Elige Excel o PDF.")
 st.sidebar.write("2. Sube el archivo origen.")
 st.sidebar.write("3. Selecciona una plantilla integrada o sube una propia.")
 st.sidebar.write("4. Edita datos generales.")
-st.sidebar.write("5. Genera y descarga el Excel o PDF.")
+st.sidebar.write("5. Genera y descarga el Excel o PDF con cierre visual.")
 st.sidebar.divider()
 st.sidebar.info("La app incluye FORMATOS.xlsx como banco de plantillas.")
 

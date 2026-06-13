@@ -1,10 +1,13 @@
-# Sistema de requisiciones v12
+# Sistema de requisiciones v13
 
-Cambios sobre v11:
-- Mantiene la descarga del Excel generado.
-- Agrega botón para descargar el PDF generado a partir del Excel final.
-- El PDF se genera con LibreOffice en modo headless.
-- Se agrega packages.txt con libreoffice-calc para Streamlit Community Cloud.
+Cambios sobre v12:
+- Mantiene la descarga de Excel.
+- Mantiene la descarga de PDF.
+- Agrega cierre visual después del último artículo:
+  - línea gris al final del último artículo.
+  - diagonal sobre el espacio vacío restante.
+- El cierre se aplica en el Excel y también sale igual en el PDF, porque el PDF se genera desde el Excel final.
+- Mantiene packages.txt con libreoffice-calc para Streamlit Community Cloud.
 
 ## Archivos requeridos
 
