@@ -685,9 +685,6 @@ def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count:
 
     if filas_extra:
         # Copiar siempre el formato de una fila normal de artículo.
-        # Antes se copiaba la fila justo antes del subtotal y, en algunos formatos,
-        # esa fila tenía alineación/estilo raro. Por eso los últimos productos
-        # podían salir centrados o desacomodados cuando había muchas partidas.
         fila_estilo = data_start
         ws.insert_rows(subtotal_row, amount=filas_extra)
         for row in range(subtotal_row, subtotal_row + filas_extra):
@@ -696,49 +693,70 @@ def preparar_filas_tabla(ws, data_start: int, subtotal_row: int, partidas_count:
     return filas_extra
 
 
-def normalizar_filas_partidas(ws, data_start: int, data_end: int, cols: dict[str, int]):
+def celda_real(ws, row: int, col: int):
     """
-    Cuando la requisición trae muchas partidas, algunas plantillas tienen celdas
-    combinadas o alineaciones raras en la parte baja de la tabla. Esta función
-    deja toda la zona de artículos con estructura normal antes de escribir datos.
+    Devuelve la celda ancla real aunque la coordenada caiga dentro de una celda combinada.
+    """
+    coord = ws.cell(row, col).coordinate
+    return ws[anchor_coord(ws, coord)]
+
+
+def aplicar_formato_partida(ws, row: int, cols: dict[str, int]):
+    """
+    Aplica alineación estable a una fila de partida respetando celdas combinadas.
+    """
+    for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
+        cell = celda_real(ws, row, col)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    desc_cell = celda_real(ws, row, cols["descripcion"])
+    desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    for col in [cols["pu"], cols["total"]]:
+        cell = celda_real(ws, row, col)
+        cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+        cell.number_format = '"$"#,##0.00'
+
+
+def preparar_estructura_tabla_requisicion(ws, data_start: int, data_end: int, cols: dict[str, int]):
+    """
+    Corrige la estructura de la tabla cuando hay muchas partidas:
+    - No rompe el diseño completo.
+    - Rehace únicamente el rango combinado de DESCRIPCIÓN por fila.
+    - Evita que las últimas descripciones se vayan centradas o desacomodadas.
     """
     if data_end < data_start:
         return
 
-    col_inicio = min(cols["par"], cols["cantidad"], cols["unidad"], cols["descripcion"], cols["codigo"], cols["pu"], cols["total"])
-    col_fin = max(cols["par"], cols["cantidad"], cols["unidad"], cols["descripcion"], cols["codigo"], cols["pu"], cols["total"])
+    desc_inicio = cols["descripcion"]
+    desc_fin = max(desc_inicio, cols["codigo"] - 1)
 
-    # Descombinar solo dentro del cuerpo de partidas. No tocar encabezados ni firmas.
+    # Solo tocar combinaciones que intersectan el bloque de descripción del cuerpo de partidas.
     for rango in list(ws.merged_cells.ranges):
         min_col, min_row, max_col, max_row = range_boundaries(str(rango))
         intersecta_filas = not (max_row < data_start or min_row > data_end)
-        intersecta_cols = not (max_col < col_inicio or min_col > col_fin)
-        if intersecta_filas and intersecta_cols:
+        intersecta_desc = not (max_col < desc_inicio or min_col > desc_fin)
+        if intersecta_filas and intersecta_desc:
             try:
                 ws.unmerge_cells(str(rango))
             except Exception:
                 pass
 
-    # Reaplicar estilo de una fila normal a todas las filas de partidas.
-    fila_estilo = data_start
+    # Rehacer el merge de descripción por cada fila, igual que la plantilla original.
+    if desc_fin > desc_inicio:
+        for row in range(data_start, data_end + 1):
+            try:
+                ws.merge_cells(
+                    start_row=row,
+                    start_column=desc_inicio,
+                    end_row=row,
+                    end_column=desc_fin,
+                )
+            except Exception:
+                pass
+
     for row in range(data_start, data_end + 1):
-        copy_row_style(ws, fila_estilo, row, ws.max_column)
-
-        # Alineaciones estables por columna.
-        for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
-            cell = ws.cell(row, col)
-            if not isinstance(cell, MergedCell):
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        desc_cell = ws.cell(row, cols["descripcion"])
-        if not isinstance(desc_cell, MergedCell):
-            desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-
-        for col in [cols["pu"], cols["total"]]:
-            cell = ws.cell(row, col)
-            if not isinstance(cell, MergedCell):
-                cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
-                cell.number_format = '"$"#,##0.00'
+        aplicar_formato_partida(ws, row, cols)
 
 
 # =========================
@@ -809,12 +827,11 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
     iva_row = subtotal_row + 1
     total_row = subtotal_row + 2
 
-    # Normalizar toda la zona de artículos para evitar que los últimos productos
-    # salgan centrados o combinados cuando hay muchas partidas.
-    normalizar_filas_partidas(ws, data_start, subtotal_row - 1, cols)
+    # Preparar estructura del cuerpo de la tabla sin romper las líneas.
+    preparar_estructura_tabla_requisicion(ws, data_start, subtotal_row - 1, cols)
 
-    # Limpiar toda la zona de partidas, sin tocar subtotal/firma/observaciones.
-    for row in range(data_start, subtotal_row):
+    # Limpiar rango de partidas, sin tocar la estructura.
+    for row in range(data_start, data_start + len(partidas)):
         for col in [cols["par"], 2, cols["cantidad"], cols["unidad"], cols["descripcion"], cols["codigo"], cols["pu"], cols["total"]]:
             if col <= ws.max_column:
                 set_cell(ws, ws.cell(row, col).coordinate, None)
@@ -830,22 +847,8 @@ def llenar_requisicion(ws, campos: dict[str, Any], partidas: list[dict[str, Any]
         set_cell(ws, ws.cell(row, cols["pu"]).coordinate, partida.get("precio_unitario"))
         set_cell(ws, ws.cell(row, cols["total"]).coordinate, f"={ws.cell(row, cols['cantidad']).coordinate}*{ws.cell(row, cols['pu']).coordinate}")
 
-        # Forzar formato estable aunque la plantilla inserte filas extra.
-        # Evita que los últimos productos salgan centrados/desacomodados.
-        for col in [cols["par"], cols["cantidad"], cols["unidad"], cols["codigo"]]:
-            cell = ws.cell(row, col)
-            if not isinstance(cell, MergedCell):
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        desc_cell = ws.cell(row, cols["descripcion"])
-        if not isinstance(desc_cell, MergedCell):
-            desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-
-        for col in [cols["pu"], cols["total"]]:
-            cell = ws.cell(row, col)
-            if not isinstance(cell, MergedCell):
-                cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
-                cell.number_format = '"$"#,##0.00'
+        # Forzar formato estable respetando celdas combinadas.
+        aplicar_formato_partida(ws, row, cols)
 
     # Totales.
     set_cell(ws, ws.cell(subtotal_row, max(1, cols["total"] - 1)).coordinate, "SUBTOTAL")
