@@ -1039,10 +1039,45 @@ def llenar_plantilla(
 # =========================
 # CONVERSIÓN A PDF
 # =========================
+import signal
+import threading
+
+# Solo se permite UNA conversión de LibreOffice a la vez en todo el proceso.
+# Esto evita que varios usuarios generando PDFs al mismo tiempo disparen
+# varias instancias de soffice simultáneas, que es lo que satura la RAM
+# en el plan gratuito de Streamlit Cloud.
+_LOCK_LIBREOFFICE = threading.Lock()
+
+
+def _matar_procesos_soffice_huerfanos() -> None:
+    """
+    Mata cualquier proceso 'soffice'/'oosplash' que haya quedado colgado de
+    una conversión anterior (por ejemplo, si un usuario cerró la pestaña a
+    medio proceso, o si hubo un timeout). Esos procesos huérfanos son la
+    causa más común de que la memoria se vaya llenando poco a poco hasta
+    que Streamlit Cloud mata la app entera.
+    """
+    try:
+        subprocess.run(
+            ["pkill", "-9", "-f", "soffice"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except Exception:
+        # pkill puede no existir o no encontrar nada; no es crítico.
+        pass
+
+
 def convertir_excel_a_pdf(excel_bytes: bytes, nombre_base: str) -> BytesIO:
     """
     Convierte el Excel generado a PDF usando LibreOffice en modo headless.
     En Streamlit Cloud se requiere packages.txt con libreoffice-calc.
+
+    Incluye limpieza de procesos huérfanos y evita conversiones simultáneas
+    para prevenir que la memoria del servidor se vaya acumulando con el
+    tiempo (causa típica de que la app deje de responder tras un tiempo
+    funcionando bien).
     """
     ejecutable = shutil.which("libreoffice") or shutil.which("soffice")
     if not ejecutable:
@@ -1053,50 +1088,76 @@ def convertir_excel_a_pdf(excel_bytes: bytes, nombre_base: str) -> BytesIO:
 
     nombre_seguro = re.sub(r"[^A-Za-z0-9_-]", "_", nombre_base).strip("_") or "REQUISICION"
 
-    with tempfile.TemporaryDirectory() as tmp:
-        carpeta = Path(tmp)
-        entrada = carpeta / f"{nombre_seguro}.xlsx"
-        salida_dir = carpeta / "pdf"
-        salida_dir.mkdir(parents=True, exist_ok=True)
+    with _LOCK_LIBREOFFICE:
+        # Por si quedó algo colgado de un intento anterior.
+        _matar_procesos_soffice_huerfanos()
 
-        entrada.write_bytes(excel_bytes)
+        with tempfile.TemporaryDirectory() as tmp:
+            carpeta = Path(tmp)
+            entrada = carpeta / f"{nombre_seguro}.xlsx"
+            salida_dir = carpeta / "pdf"
+            salida_dir.mkdir(parents=True, exist_ok=True)
 
-        env = os.environ.copy()
-        env["HOME"] = str(carpeta)
+            entrada.write_bytes(excel_bytes)
 
-        comando = [
-            ejecutable,
-            "--headless",
-            "--convert-to",
-            "pdf",
-            "--outdir",
-            str(salida_dir),
-            str(entrada),
-        ]
+            env = os.environ.copy()
+            env["HOME"] = str(carpeta)
+            # Reduce el consumo de memoria/CPU de LibreOffice al arrancar.
+            env["SAL_DISABLE_OPENCL"] = "1"
+            env["SAL_DISABLE_CRASHDUMP"] = "1"
+            env["SAL_NO_QUICKSTART"] = "1"
 
-        proceso = subprocess.run(
-            comando,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=120,
-            env=env,
-        )
+            comando = [
+                ejecutable,
+                "--headless",
+                "--norestore",
+                "--nolockcheck",
+                "--nodefault",
+                "--nofirststartwizard",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(salida_dir),
+                str(entrada),
+            ]
 
-        pdf_esperado = salida_dir / f"{nombre_seguro}.pdf"
-        if not pdf_esperado.exists():
-            pdfs = list(salida_dir.glob("*.pdf"))
-            if pdfs:
-                pdf_esperado = pdfs[0]
-            else:
-                raise RuntimeError(
-                    "LibreOffice no generó el PDF. "
-                    f"Salida: {proceso.stdout} Error: {proceso.stderr}"
+            proceso = None
+            try:
+                proceso = subprocess.run(
+                    comando,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=120,
+                    env=env,
+                    start_new_session=True,  # permite matar todo el árbol de procesos si hay timeout
                 )
+            except subprocess.TimeoutExpired:
+                # Si se cuelga, no dejamos el proceso vivo consumiendo RAM.
+                _matar_procesos_soffice_huerfanos()
+                raise RuntimeError(
+                    "LibreOffice tardó demasiado en convertir el archivo (más de 2 minutos). "
+                    "Intenta de nuevo; si se repite, reinicia la app desde Streamlit Cloud."
+                )
+            finally:
+                # Limpieza final: nunca dejar soffice vivo tras esta conversión.
+                _matar_procesos_soffice_huerfanos()
 
-        resultado = BytesIO(pdf_esperado.read_bytes())
-        resultado.seek(0)
-        return resultado
+            pdf_esperado = salida_dir / f"{nombre_seguro}.pdf"
+            if not pdf_esperado.exists():
+                pdfs = list(salida_dir.glob("*.pdf"))
+                if pdfs:
+                    pdf_esperado = pdfs[0]
+                else:
+                    raise RuntimeError(
+                        "LibreOffice no generó el PDF. "
+                        f"Salida: {proceso.stdout if proceso else ''} "
+                        f"Error: {proceso.stderr if proceso else ''}"
+                    )
+
+            resultado = BytesIO(pdf_esperado.read_bytes())
+            resultado.seek(0)
+            return resultado
 
 
 # =========================
